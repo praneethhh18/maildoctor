@@ -55,7 +55,57 @@ def _llm_check(settings) -> int:
             ok = False
             print(f"{label}: FAILED after {time.monotonic() - t0:5.1f}s -> {e}")
     print(f"Model in use: {llm.name}")
+    if not ok and llm.name.startswith("gemini"):
+        _gemini_scout(settings)
     return 0 if ok else 2
+
+
+def _gemini_scout(settings) -> int:
+    """List the Gemini models this key can use and time a tiny request on each fast one."""
+    import time
+
+    import httpx
+
+    base = "https://generativelanguage.googleapis.com/v1beta"
+    key = {"key": settings.gemini_api_key}
+    print("\nChecking which Gemini models respond quickly on your key...")
+    t0 = time.monotonic()
+    try:
+        r = httpx.get(f"{base}/models", params={**key, "pageSize": 200}, timeout=20)
+    except httpx.HTTPError as e:
+        print(f"  Could not even list models ({type(e).__name__}). This is a network problem on this "
+              "computer (VPN, proxy, antivirus or firewall), not the model.")
+        return 2
+    print(f"  Listing models took {time.monotonic() - t0:.1f}s (HTTP {r.status_code}) -> network to Google is OK"
+          if r.status_code == 200 else f"  Listing models failed: HTTP {r.status_code} {r.text[:200]}")
+    if r.status_code != 200:
+        return 2
+    names = [m["name"].split("/", 1)[1] for m in r.json().get("models", [])
+             if "generateContent" in m.get("supportedGenerationMethods", [])]
+    pick = [n for n in names if "flash" in n and not any(x in n for x in ("image", "tts", "audio", "live", "embed"))]
+    pick = sorted(pick, key=lambda n: ("lite" not in n, n), reverse=False)[:6]
+    if not pick:
+        print("  No 'flash' models available on this key. Available: " + ", ".join(names[:15]))
+        return 2
+    best = None
+    for name in pick:
+        t0 = time.monotonic()
+        try:
+            rr = httpx.post(f"{base}/models/{name}:generateContent", params=key, timeout=25,
+                            json={"contents": [{"role": "user", "parts": [{"text": "Reply with the word OK."}]}]})
+            dt = time.monotonic() - t0
+            status = "OK" if rr.status_code == 200 else f"HTTP {rr.status_code}"
+        except httpx.HTTPError as e:
+            dt, status = time.monotonic() - t0, type(e).__name__
+        print(f"  {name:40s} {status:14s} {dt:5.1f}s")
+        if status == "OK" and (best is None or dt < best[1]):
+            best = (name, dt)
+    if best:
+        print(f"\nFastest working model: {best[0]} ({best[1]:.1f}s). Put this in .env:\n  GEMINI_MODEL={best[0]}")
+    else:
+        print("\nNo model answered in time. Likely the free-tier quota/rate limit on this key, "
+              "or Google is overloaded. Try again later or use OpenAI (OPENAI_API_KEY).")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
