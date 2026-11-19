@@ -76,7 +76,7 @@ def test_llm_timeout_falls_back_to_playbook():
     import httpx
     from maildoctor.agent import investigate
     from maildoctor.agent.llm import GeminiChat
-    from tests.conftest import HEALTHY, ctx_for
+    from conftest import HEALTHY, ctx_for
 
     calls = {"n": 0}
 
