@@ -51,6 +51,11 @@ class Settings:
     # Network timeouts for HTTP/TLS/RDAP checks
     http_timeout: float = field(default_factory=lambda: float(_env("MAILDOCTOR_HTTP_TIMEOUT", "8")))
 
+    # LLM: seconds to wait for one model reply, and for the whole agent run.
+    # If the run budget is used up, MailDoctor finishes with the rule-based playbook.
+    llm_timeout: float = field(default_factory=lambda: float(_env("MAILDOCTOR_LLM_TIMEOUT", "90")))
+    agent_budget: float = field(default_factory=lambda: float(_env("MAILDOCTOR_AGENT_BUDGET", "150")))
+
     def resolved_provider(self) -> str:
         """Pick the LLM provider. 'auto' = Gemini if key, else OpenAI if key, else offline."""
         p = self.llm_provider.lower()

@@ -69,3 +69,38 @@ def test_gemini_request_and_parse():
     assert b["contents"][2]["parts"][0]["functionResponse"]["name"] == "check_mx"
     decl = b["tools"][0]["functionDeclarations"][0]
     assert "additionalProperties" not in decl["parameters"]  # stripped for Gemini
+
+
+def test_llm_timeout_falls_back_to_playbook():
+    """A slow model must never crash the request: retry once, then use the rule-based playbook."""
+    import httpx
+    from maildoctor.agent import investigate
+    from maildoctor.agent.llm import GeminiChat
+    from tests.conftest import HEALTHY, ctx_for
+
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        raise httpx.ReadTimeout("The read operation timed out", request=request)
+
+    llm = GeminiChat("k", "gemini-x", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    diag = investigate(ctx_for(HEALTHY), llm, "good.in", "emails go to spam")
+    assert calls["n"] == 2  # one retry
+    assert any("AI agent unavailable" in l and "timed out" in l for l in diag.limits)
+    assert diag.findings  # playbook still produced real checks
+
+
+def test_api_errors_are_json():
+    from fastapi.testclient import TestClient
+    import maildoctor.api as api
+
+    def boom(*a, **k):
+        raise RuntimeError("kaboom")
+
+    api.make_context, old = boom, api.make_context
+    try:
+        r = TestClient(api.app, raise_server_exceptions=False).post("/api/scan", json={"domain": "good.in"})
+    finally:
+        api.make_context = old
+    assert r.status_code == 500 and "kaboom" in r.json()["detail"]

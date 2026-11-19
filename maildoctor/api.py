@@ -20,8 +20,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from . import __version__
@@ -34,6 +34,12 @@ from .report import render_text
 from .tools import REGISTRY, make_context, norm_domain, run_tool
 
 app = FastAPI(title="MailDoctor", version=__version__)
+
+
+@app.exception_handler(Exception)
+async def _any_error(request: Request, exc: Exception) -> JSONResponse:
+    # Always answer in JSON so the UI can show a readable message, never a raw 500 page.
+    return JSONResponse(status_code=500, content={"detail": f"{type(exc).__name__}: {exc}"[:400]})
 WEB = Path(__file__).parent / "web"
 
 

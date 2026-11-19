@@ -48,14 +48,32 @@ class LLMError(RuntimeError):
     pass
 
 
+def _send(client: httpx.Client, who: str, url: str, **kw) -> httpx.Response:
+    """POST with one retry. Network problems (timeout, DNS, reset) become LLMError,
+    so the agent loop can fall back to the rule-based playbook instead of crashing."""
+    last: Exception | None = None
+    for _ in range(2):
+        try:
+            r = client.post(url, **kw)
+            if r.status_code in (429, 500, 502, 503, 504) and last is None:
+                last = LLMError(f"{who} HTTP {r.status_code}")
+                continue
+            return r
+        except httpx.TimeoutException as e:
+            last = LLMError(f"{who} timed out ({type(e).__name__})")
+        except httpx.HTTPError as e:
+            last = LLMError(f"{who} network error ({type(e).__name__}: {e})")
+    raise last  # type: ignore[misc]
+
+
 # ---------------------------------------------------------------- OpenAI
 class OpenAIChat:
     """Works with OpenAI and any OpenAI-compatible endpoint (Groq, OpenRouter, local)."""
 
-    def __init__(self, api_key: str, model: str, base_url: str, client: httpx.Client | None = None):
+    def __init__(self, api_key: str, model: str, base_url: str, client: httpx.Client | None = None, timeout: float = 90):
         self.name = f"openai:{model}"
         self.key, self.model, self.base = api_key, model, base_url.rstrip("/")
-        self.c = client or httpx.Client(timeout=60)
+        self.c = client or httpx.Client(timeout=httpx.Timeout(timeout, connect=10))
 
     def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
         msgs: list[dict] = [{"role": "system", "content": system}]
@@ -70,7 +88,8 @@ class OpenAIChat:
                 msgs.append({"role": m["role"], "content": m["content"]})
         body = {"model": self.model, "messages": msgs, "temperature": 0.1,
                 "tools": [{"type": "function", "function": t} for t in tools], "tool_choice": "auto"}
-        r = self.c.post(f"{self.base}/chat/completions", json=body, headers={"Authorization": f"Bearer {self.key}"})
+        r = _send(self.c, "OpenAI", f"{self.base}/chat/completions", json=body,
+                  headers={"Authorization": f"Bearer {self.key}"})
         if r.status_code >= 400:
             raise LLMError(f"OpenAI HTTP {r.status_code}: {r.text[:300]}")
         msg = r.json()["choices"][0]["message"]
@@ -95,14 +114,14 @@ def _gemini_schema(s: Any) -> Any:
 
 
 class GeminiChat:
-    def __init__(self, api_key: str, model: str, client: httpx.Client | None = None):
+    def __init__(self, api_key: str, model: str, client: httpx.Client | None = None, timeout: float = 90):
         self.name = f"gemini:{model}"
         self.key, self.model = api_key, model
-        self.c = client or httpx.Client(timeout=60)
+        self.c = client or httpx.Client(timeout=httpx.Timeout(timeout, connect=10))
 
     def _post(self, body: dict) -> httpx.Response:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-        return self.c.post(url, params={"key": self.key}, json=body)
+        return _send(self.c, "Gemini", url, params={"key": self.key}, json=body)
 
     def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
         contents: list[dict] = []
@@ -174,7 +193,8 @@ class ScriptedLLM:
 def make_llm(settings: Settings) -> LLM | None:
     p = settings.resolved_provider()
     if p == "gemini" and settings.gemini_api_key:
-        return GeminiChat(settings.gemini_api_key, settings.gemini_model)
+        return GeminiChat(settings.gemini_api_key, settings.gemini_model, timeout=settings.llm_timeout)
     if p == "openai" and settings.openai_api_key:
-        return OpenAIChat(settings.openai_api_key, settings.openai_model, settings.openai_base_url)
+        return OpenAIChat(settings.openai_api_key, settings.openai_model, settings.openai_base_url,
+                          timeout=settings.llm_timeout)
     return None

@@ -16,6 +16,7 @@ so the product still works (and tests run without network).
 from __future__ import annotations
 
 import json
+import time
 import re
 from typing import Any
 
@@ -47,7 +48,7 @@ def investigate(ctx: Context, llm: LLM | None, domain: str, complaint: str = "",
         return _with_providers(ctx, offline_investigate(ctx, d, complaint, headers, bounce, client_error))
     try:
         return _with_providers(ctx, _llm_investigate(ctx, llm, d, complaint, headers, bounce, client_error))
-    except LLMError as e:
+    except Exception as e:  # LLMError, or anything unexpected from the model side
         diag = offline_investigate(ctx, d, complaint, headers, bounce, client_error)
         short = str(e).split("\n")[0][:160]
         diag.limits.insert(0, f"AI agent unavailable ({short}); used the rule-based playbook instead.")
@@ -79,7 +80,10 @@ def _llm_investigate(ctx: Context, llm: LLM, d: str, complaint: str, headers: st
     final: dict[str, Any] | None = None
     nudges = 0
 
+    deadline = time.monotonic() + ctx.settings.agent_budget
     for step in range(1, ctx.settings.max_agent_steps + 1):
+        if time.monotonic() > deadline:
+            raise LLMError(f"agent ran longer than {ctx.settings.agent_budget:.0f}s")
         resp: LLMResponse = llm.chat(SYSTEM_PROMPT, history, tools)
         if not resp.tool_calls:
             if nudges < 2:
