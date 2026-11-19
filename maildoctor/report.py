@@ -37,7 +37,9 @@ RULES = [
     ({"bl.listed"}, "A sending IP or the domain is on a spam blocklist, so receivers reject or spam the mail."),
     ({"ssl.invalid"}, "The website's SSL certificate is invalid, so browsers block it."),
     ({"web.apex_no_address"}, "The domain has no website address record, so the site can't load."),
-    ({"web.https_unreachable"}, "The web server isn't answering on HTTPS."),
+    ({"web.unreachable"}, "The domain points to a web server that doesn't answer at all (stopped server, firewall, or old IP), "
+                          "so the website is down. Email is unaffected."),
+    ({"web.https_unreachable"}, "The web server works on HTTP but not on HTTPS (no SSL certificate or port 443 closed)."),
     ({"hdr.dmarc_fail"}, "The receiver applied DMARC and the message failed alignment; fix SPF/DKIM for the sending service."),
     ({"bounce.auth"}, "The email app is failing to log in to the SMTP server (password/app-password/plan restriction)."),
     ({"bounce.user_unknown"}, "The recipient mailbox doesn't exist at the server the MX points to."),

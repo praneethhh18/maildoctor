@@ -76,49 +76,64 @@ def check_website(ctx: Context, domain: str) -> ToolResult:
         res.findings.append(Finding(id="web.http_skipped", severity=Severity.UNKNOWN, title="Live HTTP/SSL test skipped (offline mode)"))
         return res
 
-    # HTTP(S) probes, following redirects manually so we can show the chain
-    client = ctx.client()
-    for scheme in ("https", "http"):
-        url = f"{scheme}://{d}/"
-        chain = []
-        try:
-            for _ in range(6):
-                resp = client.get(url)
-                chain.append({"url": url, "status": resp.status_code, "server": resp.headers.get("server", "")})
-                if resp.status_code in {301, 302, 303, 307, 308} and "location" in resp.headers:
-                    url = str(resp.url.join(resp.headers["location"]))
-                    continue
-                break
-            res.data[f"{scheme}_chain"] = chain
-            final = chain[-1]["status"]
-            if scheme == "https":
-                if final >= 500:
-                    res.findings.append(Finding(
-                        id="web.server_error", severity=Severity.CRITICAL, title=f"Website returns HTTP {final}",
-                        detail="The server (or proxy like Cloudflare) is up but the site behind it is failing. "
-                               "520-526 from Cloudflare usually means the origin server is down or its SSL is misconfigured.",
-                        evidence={"chain": chain}))
-                elif final in {401, 403}:
-                    res.findings.append(Finding(id="web.forbidden", severity=Severity.WARNING, title=f"Website returns HTTP {final}",
-                                                detail="Access denied: missing index file, wrong folder permissions, WAF block, or hosting suspension.",
-                                                evidence={"chain": chain}))
-                elif final == 404:
-                    res.findings.append(Finding(id="web.not_found", severity=Severity.WARNING, title="Homepage returns 404",
-                                                detail="DNS works but the hosting account has no site at this path (wrong document root or site not uploaded)."))
-                else:
-                    res.findings.append(Finding(id="web.https_ok", severity=Severity.OK, title=f"HTTPS responds ({final})",
-                                                evidence={"chain": chain}))
-            elif scheme == "http" and not any(c["url"].startswith("https") for c in chain[1:]) and final < 400:
+    # HTTP(S) probes, following redirects manually so we can show the chain.
+    # Probe both schemes FIRST, then interpret them together: "HTTPS fails but HTTP
+    # works" (SSL/port 443 problem) is a very different diagnosis from "both fail"
+    # (server down / firewall / wrong IP).
+    ips = hosts[d]["a"] + hosts[d]["aaaa"]
+    probes = {s: _probe(ctx, f"{s}://{d}/") for s in ("https", "http")}
+    for s, pr in probes.items():
+        if pr["ok"]:
+            res.data[f"{s}_chain"] = pr["chain"]
+        else:
+            res.data[f"{s}_error"] = pr["error"]
+    https, http = probes["https"], probes["http"]
+
+    if not https["ok"] and not http["ok"]:
+        res.findings.append(Finding(
+            id="web.unreachable", severity=Severity.CRITICAL,
+            title=f"Web server not reachable on HTTP or HTTPS ({', '.join(ips) or 'no IP'})",
+            detail=f"Both port 80 and 443 failed ({https['kind']} / {http['kind']}). The site's DNS points to "
+                   f"{', '.join(ips) or 'nothing'}, but nothing answers there. Typical causes: the server/VM is stopped, a "
+                   "firewall or cloud security group blocks ports 80/443, the web server process isn't running, or the A "
+                   "record still points to an old server. If you don't need a site here, point the domain to a parking/landing page.",
+            evidence={"ips": ips, "https_error": https["error"], "http_error": http["error"]},
+            fix_ids=["fix.web.point_dns"]))
+    elif not https["ok"]:
+        res.findings.append(Finding(
+            id="web.https_unreachable", severity=Severity.CRITICAL, title="HTTPS fails but HTTP works",
+            detail=f"The server answers on port 80 but not securely on 443 ({https['kind']}). Usually no SSL certificate is "
+                   "installed, port 443 is closed in the firewall, or the web server isn't configured for HTTPS.",
+            evidence={"https_error": https["error"], "http_chain": http["chain"]}, fix_ids=["fix.ssl.reissue"]))
+    else:
+        final = https["chain"][-1]["status"]
+        chain = https["chain"]
+        if final >= 500:
+            res.findings.append(Finding(
+                id="web.server_error", severity=Severity.CRITICAL, title=f"Website returns HTTP {final}",
+                detail="The server (or proxy like Cloudflare) is up but the site behind it is failing. "
+                       "520-526 from Cloudflare usually means the origin server is down or its SSL is misconfigured.",
+                evidence={"chain": chain}))
+        elif final in {401, 403}:
+            res.findings.append(Finding(id="web.forbidden", severity=Severity.WARNING, title=f"Website returns HTTP {final}",
+                                        detail="Access denied: missing index file, wrong folder permissions, WAF block, or hosting suspension.",
+                                        evidence={"chain": chain}))
+        elif final == 404:
+            res.findings.append(Finding(id="web.not_found", severity=Severity.WARNING, title="Homepage returns 404",
+                                        detail="DNS works but the hosting account has no site at this path (wrong document root or site not uploaded)."))
+        else:
+            res.findings.append(Finding(id="web.https_ok", severity=Severity.OK, title=f"HTTPS responds ({final})",
+                                        evidence={"chain": chain}))
+        if http["ok"]:
+            hc = http["chain"]
+            if hc[-1]["status"] < 400 and not any(c["url"].startswith("https") for c in hc[1:]):
                 res.findings.append(Finding(id="web.no_https_redirect", severity=Severity.INFO, title="HTTP does not redirect to HTTPS",
                                             detail="Visitors on http:// stay unencrypted. Enable 'Always use HTTPS' / force SSL."))
-        except Exception as e:
-            res.data[f"{scheme}_error"] = f"{type(e).__name__}: {e}"
-            if scheme == "https":
-                res.findings.append(Finding(id="web.https_unreachable", severity=Severity.CRITICAL,
-                                            title="HTTPS connection failed",
-                                            detail=f"{type(e).__name__}. Causes: no SSL certificate, port 443 closed, server down, "
-                                                   "or DNS pointing to the wrong server.", evidence={"error": str(e)}))
 
+    # SSL certificate: only meaningful if something answers on 443
+    if not https["ok"] and https["kind"] in {"timeout", "refused", "unreachable"}:
+        res.data["ssl"] = {"skipped": "port 443 not reachable"}
+        return res
     cert = _cert_info(d, ctx.settings.http_timeout)
     res.data["ssl"] = cert
     if cert.get("valid") is False:
@@ -138,7 +153,42 @@ def check_website(ctx: Context, domain: str) -> ToolResult:
                                         evidence=cert, fix_ids=["fix.ssl.reissue"]))
         else:
             res.findings.append(Finding(id="ssl.ok", severity=Severity.OK, title=f"SSL valid ({days} days left, {cert.get('issuer')})"))
+    else:
+        res.findings.append(Finding(id="ssl.unknown", severity=Severity.UNKNOWN, title="SSL certificate could not be checked",
+                                    detail=str(cert.get("error", "")), evidence=cert))
     return res
+
+
+def _classify(e: Exception) -> str:
+    import httpx
+
+    name = type(e).__name__.lower()
+    if isinstance(e, httpx.TimeoutException) or "timeout" in name:
+        return "timeout"
+    msg = str(e).lower()
+    if "refused" in msg:
+        return "refused"
+    if "ssl" in msg or "certificate" in msg or "tls" in msg:
+        return "tls"
+    if "unreachable" in msg or "no route" in msg or "name or service" in msg or "getaddrinfo" in msg:
+        return "unreachable"
+    return "error"
+
+
+def _probe(ctx: Context, url: str) -> dict:
+    """GET a URL, following up to 5 redirects by hand. Never raises."""
+    chain = []
+    try:
+        for _ in range(6):
+            resp = ctx.client().get(url)
+            chain.append({"url": url, "status": resp.status_code, "server": resp.headers.get("server", "")})
+            if resp.status_code in {301, 302, 303, 307, 308} and "location" in resp.headers:
+                url = str(resp.url.join(resp.headers["location"]))
+                continue
+            break
+        return {"ok": True, "chain": chain, "error": None, "kind": "ok"}
+    except Exception as e:
+        return {"ok": False, "chain": chain, "error": f"{type(e).__name__}: {e}", "kind": _classify(e)}
 
 
 # ---------------------------------------------------------------- RDAP
