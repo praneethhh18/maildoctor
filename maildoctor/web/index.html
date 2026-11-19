@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MailDoctor</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#262a33; --text:#e6e8ec; --muted:#9aa1ad;
+          --ok:#3fb950; --info:#58a6ff; --warn:#d29922; --crit:#f85149; --unk:#8b949e; --acc:#7c5cff; }
+  * { box-sizing:border-box }
+  body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text) }
+  main { max-width:980px; margin:0 auto; padding:28px 18px 80px }
+  h1 { margin:0 0 4px; font-size:26px } .sub { color:var(--muted); margin:0 0 22px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px }
+  input, textarea { width:100%; background:#0c0e12; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit }
+  textarea { min-height:80px; font-family:ui-monospace,Consolas,monospace; font-size:12.5px }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px } @media (max-width:700px){ .row{grid-template-columns:1fr} }
+  button { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:10px 16px; font:inherit; cursor:pointer; margin-top:12px; margin-right:8px }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--text) }
+  button:disabled { opacity:.5; cursor:wait }
+  details summary { cursor:pointer; color:var(--muted); margin-top:10px }
+  .score { font-size:42px; font-weight:700 } .pill { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; margin-left:6px; background:#222 }
+  .f { border-left:3px solid var(--unk); padding:8px 12px; margin:8px 0; background:#12151b; border-radius:0 8px 8px 0 }
+  .f.critical{border-color:var(--crit)} .f.warning{border-color:var(--warn)} .f.ok{border-color:var(--ok)} .f.info{border-color:var(--info)}
+  .f b { display:block } .f small { color:var(--muted) }
+  code, pre { font-family:ui-monospace,Consolas,monospace; font-size:12.5px }
+  pre { background:#0c0e12; border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; white-space:pre-wrap }
+  table { width:100%; border-collapse:collapse; font-size:13px } td, th { border-bottom:1px solid var(--line); padding:6px; text-align:left; vertical-align:top }
+  .muted { color:var(--muted) } .err { color:var(--crit) } h3 { margin:6px 0 10px }
+  .copy { font-size:12px; padding:3px 8px; margin:0 0 0 6px; background:#2a2f3a }
+</style>
+</head>
+<body>
+<main>
+  <h1>🩺 MailDoctor</h1>
+  <p class="sub">Agentic diagnosis for domains, DNS, email delivery, email apps and website hosting. <span id="engine" class="pill"></span></p>
+
+  <div class="card">
+    <div class="row">
+      <div><label>Domain or email address</label><input id="domain" placeholder="example.com or you@example.com"></div>
+      <div><label>What's wrong? (in the customer's words)</label><input id="complaint" placeholder="Emails to Gmail go to spam since we moved DNS"></div>
+    </div>
+    <details><summary>Add evidence (optional): headers, bounce, email-app error</summary>
+      <label>Raw email headers ("Show original")</label><textarea id="headers"></textarea>
+      <label>Bounce / NDR message</label><textarea id="bounce"></textarea>
+      <label>Error shown by Outlook / phone / Thunderbird</label><input id="client_error">
+    </details>
+    <button id="go">Investigate (agent)</button><button id="scan" class="ghost">Quick full scan</button>
+    <span id="status" class="muted"></span>
+  </div>
+
+  <div id="out"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+fetch("/api/health").then(r=>r.json()).then(j=>$("engine").textContent="engine: "+j.engine).catch(()=>{});
+
+async function call(path, body) {
+  const r = await fetch(path, {method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(body)});
+  const j = await r.json(); if (!r.ok) throw new Error(j.detail || r.statusText); return j;
+}
+function busy(on, msg) { $("go").disabled = $("scan").disabled = on; $("status").textContent = msg || ""; }
+
+$("go").onclick = async () => {
+  busy(true, "Agent is investigating… (it picks tools step by step)");
+  try { render(await call("/api/investigate", {domain:$("domain").value, complaint:$("complaint").value,
+          headers:$("headers").value, bounce:$("bounce").value, client_error:$("client_error").value})); busy(false); }
+  catch(e){ busy(false); $("out").innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+};
+$("scan").onclick = async () => {
+  busy(true, "Running all checks…");
+  try { render(await call("/api/scan", {domain:$("domain").value})); busy(false); }
+  catch(e){ busy(false); $("out").innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+};
+
+const order = {critical:0, warning:1, unknown:2, info:3, ok:4};
+function render(d) {
+  const color = d.health_score >= 80 ? "var(--ok)" : d.health_score >= 50 ? "var(--warn)" : "var(--crit)";
+  let h = `<div class="card"><div class="score" style="color:${color}">${d.health_score}/100</div>
+    <div class="muted">${esc(d.domain)} · engine ${esc(d.engine)} · confidence ${esc(d.confidence)}</div>
+    ${d.summary ? `<p>${esc(d.summary)}</p>` : ""}
+    ${d.root_causes?.length ? `<h3>Root cause</h3><ul>${d.root_causes.map(c=>`<li>${esc(c)}</li>`).join("")}</ul>` : ""}</div>`;
+  if (d.customer_reply) h += `<div class="card"><h3>Reply you can send <button class="copy" onclick="navigator.clipboard.writeText(this.parentElement.nextElementSibling.textContent)">copy</button></h3><p>${esc(d.customer_reply)}</p></div>`;
+  if (d.fixes?.length) {
+    h += `<div class="card"><h3>Fix plan</h3>`;
+    d.fixes.forEach((p, i) => {
+      h += `<div class="f warning"><b>${i+1}. ${esc(p.title)} <span class="pill">risk ${esc(p.risk)}</span></b><small>${esc(p.why)}</small>`;
+      if (p.changes.length) h += `<table><tr><th>Action</th><th>Type</th><th>Name</th><th>Value</th><th></th></tr>${p.changes.map(c=>`<tr><td>${c.action}</td><td>${c.type}</td><td>${esc(c.name)}</td><td><code>${esc(c.value)}${c.priority!=null?` (prio ${c.priority})`:""}</code>${c.replaces&&c.action!=="add"?`<br><small>replaces: ${esc(c.replaces)}</small>`:""}</td><td>${c.value?`<button class="copy" data-v="${esc(c.value)}" onclick="navigator.clipboard.writeText(this.dataset.v)">copy</button>`:""}</td></tr>`).join("")}</table>`;
+      if (p.steps.length) h += `<ol>${p.steps.map(s=>`<li>${esc(s)}</li>`).join("")}</ol>`;
+      if (p.changes.length) h += `<details><summary>Apply automatically via Cloudflare (you approve first)</summary>
+          <label>Cloudflare API token (Zone · DNS · Edit, this zone only). Sent to your MailDoctor server only.</label>
+          <input type="password" id="tok${i}"><button class="ghost" onclick="preview('${esc(d.domain)}','${p.id}',${i})">Preview changes</button><div id="pv${i}"></div></details>`;
+      h += `</div>`;
+    });
+    h += `</div>`;
+  }
+  h += `<div class="card"><h3>Findings</h3>${[...d.findings].sort((a,b)=>order[a.severity]-order[b.severity]).map(f=>
+      `<div class="f ${f.severity}"><b>${esc(f.title)}</b>${f.detail?`<small>${esc(f.detail)}</small>`:""}</div>`).join("")}</div>`;
+  if (d.trace?.length) h += `<div class="card"><h3>How the agent got there</h3><table>${d.trace.map(s=>`<tr><td>${s.step}</td><td><code>${esc(s.tool||"think")}</code></td><td>${esc(s.thought||"")}</td><td>${esc(s.result_summary)}</td></tr>`).join("")}</table></div>`;
+  if (d.limits?.length) h += `<div class="card muted"><b>Not visible from public checks:</b><ul>${d.limits.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`;
+  $("out").innerHTML = h;
+}
+
+async function preview(domain, fixId, i) {
+  const box = $("pv"+i); box.textContent = "Previewing…";
+  try {
+    const p = await call("/api/fix/preview", {domain, fix_id:fixId, cloudflare_token:$("tok"+i).value});
+    if (!p.ops.length) { box.innerHTML = `<p class="muted">Nothing to change: records already match.</p>`; return; }
+    box.innerHTML = `<pre>${esc(JSON.stringify(p.ops.map(o=>({action:o.method, record:o.body||o.before, old:o.before})), null, 2))}</pre>
+      <p>Approval code <code>${p.approval_code}</code>. Applying will change live DNS.</p>
+      <button onclick='apply(${i}, ${JSON.stringify(JSON.stringify(p))})'>Approve & apply</button>`;
+  } catch(e) { box.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+async function apply(i, raw) {
+  const p = JSON.parse(raw), box = $("pv"+i);
+  try {
+    const r = await call("/api/fix/apply", {zone_id:p.zone_id, ops:p.ops, approval_code:p.approval_code, cloudflare_token:$("tok"+i).value});
+    box.innerHTML = `<p style="color:var(--ok)">Applied ${r.applied.length} change(s). Keep this rollback data:</p><pre>${esc(JSON.stringify(r.rollback, null, 2))}</pre>`;
+  } catch(e) { box.innerHTML += `<p class="err">${esc(e.message)}</p>`; }
+}
+</script>
+</body>
+</html>
