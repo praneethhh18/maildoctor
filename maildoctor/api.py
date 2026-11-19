@@ -5,6 +5,8 @@ Run:  uvicorn maildoctor.api:app --reload    then open http://127.0.0.1:8000
 Endpoints
   GET  /api/health                       liveness + which LLM engine is active
   GET  /api/tools                        list the agent's tools (what it *can* do)
+  GET  /api/problems                     plain-language problem catalog for the self-serve UI
+  POST /api/verify      {domain, fix_id} "I did it, check again": re-runs only the checks behind that fix
   POST /api/scan        {domain}         fixed full checklist (fast, no LLM)
   POST /api/investigate {domain, complaint, headers?, bounce?, client_error?}   agentic
   POST /api/tool        {name, args}     run one tool directly (debugging / learning)
@@ -27,6 +29,7 @@ from .agent import investigate, make_llm, scan
 from .cloudflare import CloudflareClient, CloudflareError
 from .config import get_settings
 from .fixes import FIXES
+from .problems import PROBLEMS, verify_fix
 from .report import render_text
 from .tools import REGISTRY, make_context, norm_domain, run_tool
 
@@ -40,10 +43,16 @@ class ScanIn(BaseModel):
 
 class InvestigateIn(BaseModel):
     domain: str = ""
+    problem_id: str = ""      # from /api/problems; fills the complaint for non-technical users
     complaint: str = ""
     headers: str = ""
     bounce: str = ""
     client_error: str = ""
+
+
+class VerifyIn(BaseModel):
+    domain: str
+    fix_id: str
 
 
 class ToolIn(BaseModel):
@@ -103,10 +112,28 @@ def api_scan(body: ScanIn):
 def api_investigate(body: InvestigateIn):
     if not (body.domain or body.headers or body.bounce):
         raise HTTPException(400, "give a domain, headers or a bounce message")
+    complaint = body.complaint
+    if body.problem_id:
+        p = next((x for x in PROBLEMS if x["id"] == body.problem_id), None)
+        if p is None:
+            raise HTTPException(404, "unknown problem")
+        complaint = p["complaint"] + (f". In their words: {body.complaint}" if body.complaint else "")
     s = get_settings()
-    diag = investigate(make_context(settings=s), make_llm(s), body.domain, body.complaint,
+    diag = investigate(make_context(settings=s), make_llm(s), body.domain, complaint,
                        body.headers, body.bounce, body.client_error)
     return _diag_out(diag)
+
+
+@app.get("/api/problems")
+def problems():
+    return PROBLEMS
+
+
+@app.post("/api/verify")
+def api_verify(body: VerifyIn):
+    if not norm_domain(body.domain):
+        raise HTTPException(400, "domain required")
+    return verify_fix(make_context(), body.domain, body.fix_id)  # fresh context = no cached answers
 
 
 @app.post("/api/tool")

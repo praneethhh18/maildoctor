@@ -107,5 +107,7 @@ class Diagnosis(BaseModel):
     health_score: int = 100
     trace: list[AgentStep] = Field(default_factory=list)
     engine: str = "offline"       # which brain produced it: gemini/openai/offline
+    dns_provider: str | None = None    # e.g. "Cloudflare" -> UI can offer one-click apply
+    email_provider: str | None = None
     confidence: str = "medium"
     limits: list[str] = Field(default_factory=list)  # what public checks cannot see

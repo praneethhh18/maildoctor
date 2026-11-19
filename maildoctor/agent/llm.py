@@ -15,6 +15,7 @@ Internal message format (provider-neutral):
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -99,6 +100,10 @@ class GeminiChat:
         self.key, self.model = api_key, model
         self.c = client or httpx.Client(timeout=60)
 
+    def _post(self, body: dict) -> httpx.Response:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        return self.c.post(url, params={"key": self.key}, json=body)
+
     def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
         contents: list[dict] = []
         for m in messages:
@@ -128,8 +133,15 @@ class GeminiChat:
             "tools": [{"functionDeclarations": [_gemini_schema(t) for t in tools]}],
             "generationConfig": {"temperature": 0.1},
         }
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-        r = self.c.post(url, params={"key": self.key}, json=body)
+        r = self._post(body)
+        if r.status_code == 404:
+            # Google retires model names often and says which one to use instead.
+            # Follow that hint once, so a renamed model doesn't break the product.
+            m = re.search(r"use (?:models/)?([\w.\-]+)", r.text)
+            if m and m.group(1) != self.model:
+                self.model = m.group(1)
+                self.name = f"gemini:{self.model}"
+                r = self._post(body)
         if r.status_code >= 400:
             raise LLMError(f"Gemini HTTP {r.status_code}: {r.text[:300]}")
         cands = r.json().get("candidates") or []

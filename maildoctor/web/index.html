@@ -3,123 +3,182 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MailDoctor</title>
+<title>MailDoctor: fix your domain, email & website yourself</title>
 <style>
   :root { --bg:#0f1115; --card:#171a21; --line:#262a33; --text:#e6e8ec; --muted:#9aa1ad;
           --ok:#3fb950; --info:#58a6ff; --warn:#d29922; --crit:#f85149; --unk:#8b949e; --acc:#7c5cff; }
   * { box-sizing:border-box }
-  body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text) }
+  body { margin:0; font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--text) }
   main { max-width:980px; margin:0 auto; padding:28px 18px 80px }
   h1 { margin:0 0 4px; font-size:26px } .sub { color:var(--muted); margin:0 0 22px }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px }
-  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px }
+  label { display:block; font-size:13px; color:var(--muted); margin:12px 0 4px }
   input, textarea { width:100%; background:#0c0e12; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font:inherit }
-  textarea { min-height:80px; font-family:ui-monospace,Consolas,monospace; font-size:12.5px }
-  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px } @media (max-width:700px){ .row{grid-template-columns:1fr} }
+  textarea { min-height:90px; font-family:ui-monospace,Consolas,monospace; font-size:12.5px }
   button { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:10px 16px; font:inherit; cursor:pointer; margin-top:12px; margin-right:8px }
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--text) }
+  button.small { padding:5px 10px; font-size:13px; margin-top:8px }
   button:disabled { opacity:.5; cursor:wait }
+  .tabs { display:flex; gap:8px; margin-bottom:14px } .tabs button { margin:0 } .tabs button.off { background:transparent; border:1px solid var(--line) }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:10px }
+  .prob { background:#12151b; border:1px solid var(--line); border-radius:10px; padding:14px; cursor:pointer; text-align:left; color:var(--text); margin:0 }
+  .prob:hover, .prob.sel { border-color:var(--acc); background:#1a1730 } .prob .i { font-size:22px; display:block; margin-bottom:4px }
   details summary { cursor:pointer; color:var(--muted); margin-top:10px }
-  .score { font-size:42px; font-weight:700 } .pill { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; margin-left:6px; background:#222 }
+  .score { font-size:40px; font-weight:700 } .pill { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; margin-left:6px; background:#222; color:var(--muted) }
   .f { border-left:3px solid var(--unk); padding:8px 12px; margin:8px 0; background:#12151b; border-radius:0 8px 8px 0 }
   .f.critical{border-color:var(--crit)} .f.warning{border-color:var(--warn)} .f.ok{border-color:var(--ok)} .f.info{border-color:var(--info)}
   .f b { display:block } .f small { color:var(--muted) }
+  .fix { border:1px solid var(--line); border-radius:10px; padding:14px; margin:12px 0; background:#12151b }
+  .fix h4 { margin:0 0 4px } .fix ol { margin:8px 0 0 18px; padding:0 } .fix li { margin:4px 0 }
+  .vres { margin-top:8px; font-size:14px } .vres.ok{color:var(--ok)} .vres.no{color:var(--warn)}
   code, pre { font-family:ui-monospace,Consolas,monospace; font-size:12.5px }
   pre { background:#0c0e12; border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; white-space:pre-wrap }
   table { width:100%; border-collapse:collapse; font-size:13px } td, th { border-bottom:1px solid var(--line); padding:6px; text-align:left; vertical-align:top }
-  .muted { color:var(--muted) } .err { color:var(--crit) } h3 { margin:6px 0 10px }
+  .muted { color:var(--muted) } .err { color:var(--crit) } h3 { margin:4px 0 10px }
   .copy { font-size:12px; padding:3px 8px; margin:0 0 0 6px; background:#2a2f3a }
+  .hidden { display:none }
 </style>
 </head>
 <body>
 <main>
   <h1>🩺 MailDoctor</h1>
-  <p class="sub">Agentic diagnosis for domains, DNS, email delivery, email apps and website hosting. <span id="engine" class="pill"></span></p>
+  <p class="sub">Fix your domain, email and website problems yourself, in plain English. <span id="engine" class="pill"></span></p>
 
-  <div class="card">
-    <div class="row">
-      <div><label>Domain or email address</label><input id="domain" placeholder="example.com or you@example.com"></div>
-      <div><label>What's wrong? (in the customer's words)</label><input id="complaint" placeholder="Emails to Gmail go to spam since we moved DNS"></div>
+  <div class="tabs"><button id="tabEasy">Fix a problem</button><button id="tabPro" class="off">Expert mode</button></div>
+
+  <!-- Self-serve -->
+  <div id="easy" class="card">
+    <h3>1. What's going wrong?</h3>
+    <div id="probs" class="grid"></div>
+    <div id="step2" class="hidden">
+      <h3 style="margin-top:18px">2. Your domain or email address</h3>
+      <input id="e_domain" placeholder="yourbusiness.com or you@yourbusiness.com">
+      <div id="extraBox" class="hidden"><label id="extraLabel"></label><textarea id="e_extra"></textarea></div>
+      <label>Anything else? (optional, in your own words)</label>
+      <input id="e_note" placeholder="e.g. started yesterday after I changed hosting">
+      <button id="e_go">Find the problem</button><span id="e_status" class="muted"></span>
     </div>
-    <details><summary>Add evidence (optional): headers, bounce, email-app error</summary>
-      <label>Raw email headers ("Show original")</label><textarea id="headers"></textarea>
-      <label>Bounce / NDR message</label><textarea id="bounce"></textarea>
-      <label>Error shown by Outlook / phone / Thunderbird</label><input id="client_error">
-    </details>
-    <button id="go">Investigate (agent)</button><button id="scan" class="ghost">Quick full scan</button>
-    <span id="status" class="muted"></span>
+  </div>
+
+  <!-- Expert -->
+  <div id="pro" class="card hidden">
+    <label>Domain or email address</label><input id="domain" placeholder="example.com">
+    <label>Complaint (customer's words)</label><input id="complaint" placeholder="Emails to Gmail go to spam since we moved DNS">
+    <label>Raw email headers</label><textarea id="headers"></textarea>
+    <label>Bounce / NDR message</label><textarea id="bounce"></textarea>
+    <label>Email-app error</label><input id="client_error">
+    <button id="go">Investigate (agent)</button><button id="scan" class="ghost">Quick full scan</button><span id="status" class="muted"></span>
   </div>
 
   <div id="out"></div>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-fetch("/api/health").then(r=>r.json()).then(j=>$("engine").textContent="engine: "+j.engine).catch(()=>{});
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let PROBS = [], picked = null, mode = "easy";
+fetch("/api/health").then(r=>r.json()).then(j=>$("engine").textContent = j.engine==="offline" ? "rule-based mode" : "AI agent: "+j.engine).catch(()=>{});
 
 async function call(path, body) {
   const r = await fetch(path, {method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(body)});
   const j = await r.json(); if (!r.ok) throw new Error(j.detail || r.statusText); return j;
 }
-function busy(on, msg) { $("go").disabled = $("scan").disabled = on; $("status").textContent = msg || ""; }
+function setTab(m) { mode = m; $("easy").classList.toggle("hidden", m!=="easy"); $("pro").classList.toggle("hidden", m!=="pro");
+  $("tabEasy").classList.toggle("off", m!=="easy"); $("tabPro").classList.toggle("off", m!=="pro"); }
+$("tabEasy").onclick = () => setTab("easy"); $("tabPro").onclick = () => setTab("pro");
 
-$("go").onclick = async () => {
-  busy(true, "Agent is investigating… (it picks tools step by step)");
-  try { render(await call("/api/investigate", {domain:$("domain").value, complaint:$("complaint").value,
-          headers:$("headers").value, bounce:$("bounce").value, client_error:$("client_error").value})); busy(false); }
-  catch(e){ busy(false); $("out").innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+fetch("/api/problems").then(r=>r.json()).then(list => {
+  PROBS = list;
+  $("probs").innerHTML = list.map(p => `<button class="prob" data-id="${p.id}"><span class="i">${p.icon}</span>${esc(p.label)}</button>`).join("");
+  document.querySelectorAll(".prob").forEach(b => b.onclick = () => {
+    document.querySelectorAll(".prob").forEach(x => x.classList.remove("sel")); b.classList.add("sel");
+    picked = PROBS.find(p => p.id === b.dataset.id); $("step2").classList.remove("hidden");
+    $("extraBox").classList.toggle("hidden", !picked.extra); $("extraLabel").textContent = picked.extra_label || "";
+    $("e_domain").focus();
+  });
+});
+
+$("e_go").onclick = async () => {
+  if (!$("e_domain").value.trim()) { $("e_status").textContent = "Please enter your domain."; return; }
+  const body = {domain:$("e_domain").value, problem_id:picked.id, complaint:$("e_note").value};
+  if (picked.extra) body[picked.extra] = $("e_extra").value;
+  await run("/api/investigate", body, "e_go", "e_status", "Checking… this takes 10–40 seconds");
 };
-$("scan").onclick = async () => {
-  busy(true, "Running all checks…");
-  try { render(await call("/api/scan", {domain:$("domain").value})); busy(false); }
-  catch(e){ busy(false); $("out").innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
-};
+$("go").onclick = () => run("/api/investigate", {domain:$("domain").value, complaint:$("complaint").value,
+  headers:$("headers").value, bounce:$("bounce").value, client_error:$("client_error").value}, "go", "status", "Agent is investigating…");
+$("scan").onclick = () => run("/api/scan", {domain:$("domain").value}, "scan", "status", "Running all checks…");
+
+async function run(path, body, btn, st, msg) {
+  $(btn).disabled = true; $(st).textContent = " " + msg; $("out").innerHTML = "";
+  try { render(await call(path, body)); $(st).textContent = ""; }
+  catch(e) { $(st).textContent = ""; $("out").innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+  $(btn).disabled = false;
+}
 
 const order = {critical:0, warning:1, unknown:2, info:3, ok:4};
 function render(d) {
+  const crit = d.findings.filter(f => f.severity==="critical").length, warn = d.findings.filter(f => f.severity==="warning").length;
   const color = d.health_score >= 80 ? "var(--ok)" : d.health_score >= 50 ? "var(--warn)" : "var(--crit)";
+  const headline = crit ? `We found ${crit} problem${crit>1?"s":""} that need fixing` : warn ? "Mostly healthy, a few things to improve" : "Everything we can check looks healthy ✓";
   let h = `<div class="card"><div class="score" style="color:${color}">${d.health_score}/100</div>
-    <div class="muted">${esc(d.domain)} · engine ${esc(d.engine)} · confidence ${esc(d.confidence)}</div>
-    ${d.summary ? `<p>${esc(d.summary)}</p>` : ""}
-    ${d.root_causes?.length ? `<h3>Root cause</h3><ul>${d.root_causes.map(c=>`<li>${esc(c)}</li>`).join("")}</ul>` : ""}</div>`;
-  if (d.customer_reply) h += `<div class="card"><h3>Reply you can send <button class="copy" onclick="navigator.clipboard.writeText(this.parentElement.nextElementSibling.textContent)">copy</button></h3><p>${esc(d.customer_reply)}</p></div>`;
+    <h3>${headline}</h3>
+    ${d.root_causes?.length && crit ? `<p><b>What's wrong:</b> ${esc(d.root_causes[0])}</p>` : ""}
+    ${d.summary && mode==="pro" ? `<p class="muted">${esc(d.summary)}</p>` : ""}
+    <div class="muted" style="font-size:13px">${esc(d.domain)}${d.dns_provider?` · DNS at ${esc(d.dns_provider)}`:""}${d.email_provider?` · email by ${esc(d.email_provider)}`:""}</div></div>`;
+
   if (d.fixes?.length) {
-    h += `<div class="card"><h3>Fix plan</h3>`;
+    h += `<div class="card"><h3>How to fix it, step by step</h3><p class="muted">Do these in order. After each one, press <b>"I did it, check again"</b>.</p>`;
     d.fixes.forEach((p, i) => {
-      h += `<div class="f warning"><b>${i+1}. ${esc(p.title)} <span class="pill">risk ${esc(p.risk)}</span></b><small>${esc(p.why)}</small>`;
-      if (p.changes.length) h += `<table><tr><th>Action</th><th>Type</th><th>Name</th><th>Value</th><th></th></tr>${p.changes.map(c=>`<tr><td>${c.action}</td><td>${c.type}</td><td>${esc(c.name)}</td><td><code>${esc(c.value)}${c.priority!=null?` (prio ${c.priority})`:""}</code>${c.replaces&&c.action!=="add"?`<br><small>replaces: ${esc(c.replaces)}</small>`:""}</td><td>${c.value?`<button class="copy" data-v="${esc(c.value)}" onclick="navigator.clipboard.writeText(this.dataset.v)">copy</button>`:""}</td></tr>`).join("")}</table>`;
+      h += `<div class="fix"><h4>Step ${i+1}: ${esc(p.title)}</h4><div class="muted">${esc(p.why)}</div>`;
+      if (p.changes.length) h += `<p style="margin:10px 0 4px">Make these DNS changes:</p><table><tr><th>Do</th><th>Type</th><th>Name / Host</th><th>Value</th></tr>${p.changes.map(c=>`<tr><td>${esc(c.action)}</td><td>${esc(c.type)}</td><td><code>${esc(c.name)}</code></td><td><code>${esc(c.value || c.replaces || "")}</code>${c.priority!=null?` <span class="muted">(priority ${c.priority})</span>`:""}${c.value?`<button class="copy" data-v="${esc(c.value)}">copy</button>`:""}${c.replaces&&c.action==="update"?`<br><small class="muted">replaces: ${esc(c.replaces)}</small>`:""}</td></tr>`).join("")}</table>`;
       if (p.steps.length) h += `<ol>${p.steps.map(s=>`<li>${esc(s)}</li>`).join("")}</ol>`;
-      if (p.changes.length) h += `<details><summary>Apply automatically via Cloudflare (you approve first)</summary>
-          <label>Cloudflare API token (Zone · DNS · Edit, this zone only). Sent to your MailDoctor server only.</label>
-          <input type="password" id="tok${i}"><button class="ghost" onclick="preview('${esc(d.domain)}','${p.id}',${i})">Preview changes</button><div id="pv${i}"></div></details>`;
+      h += `<button class="small ghost" data-verify="${esc(p.id)}" data-domain="${esc(d.domain)}" data-i="${i}">✅ I did it, check again</button><div class="vres" id="v${i}"></div>`;
+      if (p.changes.length && (d.dns_provider||"").toLowerCase().includes("cloudflare"))
+        h += `<details><summary>⚡ Or let MailDoctor make the change for you (Cloudflare)</summary>
+          <label>Cloudflare API token with "Zone · DNS · Edit" for this domain only (Cloudflare → My Profile → API Tokens → Edit zone DNS template). Used once, not stored.</label>
+          <input type="password" id="tok${i}"><button class="small ghost" data-preview="${esc(p.id)}" data-domain="${esc(d.domain)}" data-i="${i}">Show me exactly what will change</button><div id="pv${i}"></div></details>`;
       h += `</div>`;
     });
     h += `</div>`;
   }
-  h += `<div class="card"><h3>Findings</h3>${[...d.findings].sort((a,b)=>order[a.severity]-order[b.severity]).map(f=>
-      `<div class="f ${f.severity}"><b>${esc(f.title)}</b>${f.detail?`<small>${esc(f.detail)}</small>`:""}</div>`).join("")}</div>`;
-  if (d.trace?.length) h += `<div class="card"><h3>How the agent got there</h3><table>${d.trace.map(s=>`<tr><td>${s.step}</td><td><code>${esc(s.tool||"think")}</code></td><td>${esc(s.thought||"")}</td><td>${esc(s.result_summary)}</td></tr>`).join("")}</table></div>`;
-  if (d.limits?.length) h += `<div class="card muted"><b>Not visible from public checks:</b><ul>${d.limits.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`;
+  if (d.customer_reply && mode==="pro") h += `<div class="card"><h3>Reply you can send</h3><p>${esc(d.customer_reply)}</p><button class="copy" data-v="${esc(d.customer_reply)}">copy</button></div>`;
+
+  h += `<details class="card"><summary>Technical details (${d.findings.length} checks)</summary>${[...d.findings].sort((a,b)=>order[a.severity]-order[b.severity]).map(f=>
+      `<div class="f ${f.severity}"><b>${esc(f.title)}</b>${f.detail?`<small>${esc(f.detail)}</small>`:""}</div>`).join("")}
+      ${d.trace?.length ? `<h3 style="margin-top:14px">How the agent investigated</h3><table>${d.trace.map(s=>`<tr><td>${s.step}</td><td><code>${esc(s.tool||"think")}</code></td><td>${esc(s.thought||"")}</td><td>${esc(s.result_summary)}</td></tr>`).join("")}</table>` : ""}
+      ${d.limits?.length ? `<p class="muted"><b>What outside checks can't see:</b></p><ul class="muted">${d.limits.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>` : ""}</details>`;
   $("out").innerHTML = h;
 }
 
-async function preview(domain, fixId, i) {
-  const box = $("pv"+i); box.textContent = "Previewing…";
-  try {
-    const p = await call("/api/fix/preview", {domain, fix_id:fixId, cloudflare_token:$("tok"+i).value});
-    if (!p.ops.length) { box.innerHTML = `<p class="muted">Nothing to change: records already match.</p>`; return; }
-    box.innerHTML = `<pre>${esc(JSON.stringify(p.ops.map(o=>({action:o.method, record:o.body||o.before, old:o.before})), null, 2))}</pre>
-      <p>Approval code <code>${p.approval_code}</code>. Applying will change live DNS.</p>
-      <button onclick='apply(${i}, ${JSON.stringify(JSON.stringify(p))})'>Approve & apply</button>`;
-  } catch(e) { box.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
-}
-async function apply(i, raw) {
-  const p = JSON.parse(raw), box = $("pv"+i);
-  try {
-    const r = await call("/api/fix/apply", {zone_id:p.zone_id, ops:p.ops, approval_code:p.approval_code, cloudflare_token:$("tok"+i).value});
-    box.innerHTML = `<p style="color:var(--ok)">Applied ${r.applied.length} change(s). Keep this rollback data:</p><pre>${esc(JSON.stringify(r.rollback, null, 2))}</pre>`;
-  } catch(e) { box.innerHTML += `<p class="err">${esc(e.message)}</p>`; }
-}
+// event delegation: copy / verify / preview / apply
+document.addEventListener("click", async e => {
+  const t = e.target;
+  if (t.dataset.v !== undefined && t.classList.contains("copy")) { navigator.clipboard.writeText(t.dataset.v); t.textContent = "copied"; return; }
+  if (t.dataset.verify) {
+    const box = $("v"+t.dataset.i); t.disabled = true; box.className = "vres muted"; box.textContent = "Checking again…";
+    try { const r = await call("/api/verify", {domain:t.dataset.domain, fix_id:t.dataset.verify});
+      box.className = "vres " + (r.fixed === true ? "ok" : r.fixed === false ? "no" : "muted"); box.textContent = r.message; }
+    catch(err) { box.className = "vres err"; box.textContent = err.message; }
+    t.disabled = false; return;
+  }
+  if (t.dataset.preview) {
+    const i = t.dataset.i, box = $("pv"+i); box.textContent = "Looking at your current records…";
+    try {
+      const p = await call("/api/fix/preview", {domain:t.dataset.domain, fix_id:t.dataset.preview, cloudflare_token:$("tok"+i).value});
+      if (!p.ops.length) { box.innerHTML = `<p class="muted">Nothing to change: your records already match.</p>`; return; }
+      window["_pv"+i] = p;
+      box.innerHTML = `<table><tr><th>Action</th><th>Record</th><th>Before</th></tr>${p.ops.map(o=>`<tr><td>${o.method==="POST"?"add":o.method==="PUT"?"change":"delete"}</td><td><code>${esc(o.body?`${o.body.type} ${o.body.name} ${o.body.content}`:"")}</code></td><td><code>${esc(o.before?`${o.before.type} ${o.before.content}`:"–")}</code></td></tr>`).join("")}</table>
+        <button class="small" data-apply="${i}">Approve & apply these changes</button>`;
+    } catch(err) { box.innerHTML = `<span class="err">${esc(err.message)}</span>`; }
+    return;
+  }
+  if (t.dataset.apply !== undefined) {
+    const i = t.dataset.apply, p = window["_pv"+i], box = $("pv"+i);
+    try { const r = await call("/api/fix/apply", {zone_id:p.zone_id, ops:p.ops, approval_code:p.approval_code, cloudflare_token:$("tok"+i).value});
+      box.innerHTML = `<p style="color:var(--ok)">Done: ${r.applied.length} change(s) applied. Wait a few minutes, then press "check again".</p>
+        <details><summary>Undo information (keep this)</summary><pre>${esc(JSON.stringify(r.rollback, null, 2))}</pre></details>`; }
+    catch(err) { box.innerHTML += `<p class="err">${esc(err.message)}</p>`; }
+  }
+});
 </script>
 </body>
 </html>

@@ -44,13 +44,23 @@ def investigate(ctx: Context, llm: LLM | None, domain: str, complaint: str = "",
                 headers: str = "", bounce: str = "", client_error: str = "") -> Diagnosis:
     d = norm_domain(domain) if domain else ""
     if llm is None:
-        return offline_investigate(ctx, d, complaint, headers, bounce, client_error)
+        return _with_providers(ctx, offline_investigate(ctx, d, complaint, headers, bounce, client_error))
     try:
-        return _llm_investigate(ctx, llm, d, complaint, headers, bounce, client_error)
+        return _with_providers(ctx, _llm_investigate(ctx, llm, d, complaint, headers, bounce, client_error))
     except LLMError as e:
         diag = offline_investigate(ctx, d, complaint, headers, bounce, client_error)
-        diag.limits.insert(0, f"LLM unavailable ({e}); used the rule-based playbook instead.")
-        return diag
+        short = str(e).split("\n")[0][:160]
+        diag.limits.insert(0, f"AI agent unavailable ({short}); used the rule-based playbook instead.")
+        return _with_providers(ctx, diag)
+
+
+def _with_providers(ctx: Context, diag: Diagnosis) -> Diagnosis:
+    """Attach who-hosts-what (memoised, so usually free) so the UI can offer the right fix path."""
+    if diag.domain:
+        ov = run_tool(ctx, "dns_overview", {"domain": diag.domain})
+        diag.dns_provider = ov.data.get("dns_provider")
+        diag.email_provider = ov.data.get("email_provider")
+    return diag
 
 
 def _llm_investigate(ctx: Context, llm: LLM, d: str, complaint: str, headers: str, bounce: str, client_error: str) -> Diagnosis:
@@ -192,7 +202,8 @@ def scan(ctx: Context, domain: str) -> Diagnosis:
     d = norm_domain(domain)
     results = [run_tool(ctx, "dns_overview", {"domain": d})] + [run_tool(ctx, t, {"domain": d}) for t in FULL_SCAN]
     findings = dedupe([f for r in results for f in r.findings])
-    return Diagnosis(domain=d, summary="Full health scan", root_causes=infer_root_causes(findings),
-                     findings=findings, fixes=build_fixes(ctx, d, findings), health_score=health_score(findings),
-                     engine="scan", trace=[AgentStep(step=i + 1, tool=r.tool, result_summary=_summarise(r)) for i, r in enumerate(results)],
-                     limits=list(STANDARD_LIMITS))
+    return _with_providers(ctx, Diagnosis(
+        domain=d, summary="Full health scan", root_causes=infer_root_causes(findings),
+        findings=findings, fixes=build_fixes(ctx, d, findings), health_score=health_score(findings),
+        engine="scan", trace=[AgentStep(step=i + 1, tool=r.tool, result_summary=_summarise(r)) for i, r in enumerate(results)],
+        limits=list(STANDARD_LIMITS)))

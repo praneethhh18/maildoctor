@@ -34,6 +34,21 @@ def test_openai_request_and_parse():
     assert b["tools"][0]["type"] == "function"
 
 
+def test_gemini_follows_retired_model_hint():
+    urls = []
+
+    def handler(req):
+        urls.append(str(req.url))
+        if "old-model" in str(req.url):
+            return httpx.Response(404, json={"error": {"code": 404, "message":
+                "This model models/old-model is no longer available. Please update your code to use models/new-model-9 for the latest features."}})
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+
+    llm = GeminiChat("gk", "old-model", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert llm.chat("sys", HISTORY, TOOLS).text == "ok"
+    assert llm.name == "gemini:new-model-9" and "new-model-9:generateContent" in urls[-1]
+
+
 def test_gemini_request_and_parse():
     seen = {}
 

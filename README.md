@@ -13,6 +13,11 @@ Type a domain and a complaint in plain words ("emails to Gmail go to spam since 
 
 > Why "agentic" and not "a chatbot"? See [docs/LEARN.md](docs/LEARN.md). In short: the LLM decides *strategy* (what to check next, what it means), while deterministic tools decide *facts* (does this record exist, is it valid).
 
+## Self-serve for non-technical users
+
+Open the web app, pick a problem in plain words (📥 *My emails go to spam*, 🌐 *My website won't open*, 📱 *Can't set up email on my phone*…), type your domain, and get:
+numbered fix steps for **your** DNS provider → do one → press **"I did it, check again"** → MailDoctor re-runs just the checks behind that fix and tells you *Fixed ✓* or *Not yet* (and why). Domains on Cloudflare also get an optional **"do it for me"** with preview and undo. Technical details are tucked away; *Expert mode* shows everything.
+
 ## What it checks
 
 | Area | Checks |
@@ -60,8 +65,10 @@ No API key? It still works: the agent falls back to a rule-based playbook (`engi
 |---|---|---|
 | GET | `/api/health` | – |
 | GET | `/api/tools` | – |
+| GET | `/api/problems` | – (plain-language problem catalog) |
 | POST | `/api/scan` | `{domain}` |
-| POST | `/api/investigate` | `{domain, complaint, headers?, bounce?, client_error?}` |
+| POST | `/api/investigate` | `{domain, problem_id?, complaint?, headers?, bounce?, client_error?}` |
+| POST | `/api/verify` | `{domain, fix_id}` ("I did it, check again") |
 | POST | `/api/tool` | `{name, args}` |
 | POST | `/api/fix/preview` | `{domain, fix_id, cloudflare_token}` |
 | POST | `/api/fix/apply` | `{zone_id, ops, approval_code, cloudflare_token}` |
