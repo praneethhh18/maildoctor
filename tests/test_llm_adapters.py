@@ -72,7 +72,7 @@ def test_gemini_request_and_parse():
 
 
 def test_llm_timeout_falls_back_to_playbook():
-    """A slow model must never crash the request: retry once, then use the rule-based playbook."""
+    """A slow model must never crash the request: fall back to the rule-based playbook."""
     import httpx
     from maildoctor.agent import investigate
     from maildoctor.agent.llm import GeminiChat
@@ -86,7 +86,7 @@ def test_llm_timeout_falls_back_to_playbook():
 
     llm = GeminiChat("k", "gemini-x", client=httpx.Client(transport=httpx.MockTransport(handler)))
     diag = investigate(ctx_for(HEALTHY), llm, "good.in", "emails go to spam")
-    assert calls["n"] == 2  # one retry
+    assert calls["n"] == 1  # a slow model is not retried (would double the wait)
     assert any("AI agent unavailable" in l and "timed out" in l for l in diag.limits)
     assert diag.findings  # playbook still produced real checks
 
@@ -104,3 +104,24 @@ def test_api_errors_are_json():
     finally:
         api.make_context = old
     assert r.status_code == 500 and "kaboom" in r.json()["detail"]
+
+
+def test_gemini_sends_low_thinking_and_drops_it_if_unsupported():
+    import json as _j
+    import httpx
+    from maildoctor.agent.llm import GeminiChat
+
+    seen = []
+
+    def handler(request):
+        body = _j.loads(request.content)
+        seen.append(body["generationConfig"].get("thinkingConfig"))
+        if "thinkingConfig" in body["generationConfig"]:
+            return httpx.Response(400, text='{"error":"thinking_config is not supported"}')
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+
+    llm = GeminiChat("k", "m", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert llm.chat("s", [{"role": "user", "content": "hi"}], []).text == "OK"
+    assert seen == [{"thinkingLevel": "low"}, None]
+    llm.chat("s", [{"role": "user", "content": "hi"}], [])
+    assert seen[-1] is None  # remembered

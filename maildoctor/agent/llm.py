@@ -59,8 +59,11 @@ def _send(client: httpx.Client, who: str, url: str, **kw) -> httpx.Response:
                 last = LLMError(f"{who} HTTP {r.status_code}")
                 continue
             return r
+        except httpx.ConnectTimeout as e:
+            last = LLMError(f"{who} could not connect ({type(e).__name__})")
         except httpx.TimeoutException as e:
-            last = LLMError(f"{who} timed out ({type(e).__name__})")
+            # The model itself was too slow. Retrying would only double the wait.
+            raise LLMError(f"{who} timed out ({type(e).__name__})") from e
         except httpx.HTTPError as e:
             last = LLMError(f"{who} network error ({type(e).__name__}: {e})")
     raise last  # type: ignore[misc]
@@ -114,9 +117,13 @@ def _gemini_schema(s: Any) -> Any:
 
 
 class GeminiChat:
-    def __init__(self, api_key: str, model: str, client: httpx.Client | None = None, timeout: float = 90):
+    def __init__(self, api_key: str, model: str, client: httpx.Client | None = None, timeout: float = 90,
+                 thinking: str = "low"):
         self.name = f"gemini:{model}"
         self.key, self.model = api_key, model
+        # Newer Gemini models "think" before answering, which can take minutes.
+        # Picking a tool is an easy decision, so we ask for little thinking.
+        self.thinking = thinking
         self.c = client or httpx.Client(timeout=httpx.Timeout(timeout, connect=10))
 
     def _post(self, body: dict) -> httpx.Response:
@@ -152,7 +159,14 @@ class GeminiChat:
             "tools": [{"functionDeclarations": [_gemini_schema(t) for t in tools]}],
             "generationConfig": {"temperature": 0.1},
         }
+        if self.thinking and self.thinking != "off":
+            body["generationConfig"]["thinkingConfig"] = {"thinkingLevel": self.thinking}
         r = self._post(body)
+        if r.status_code == 400 and "thinking" in r.text.lower() and "thinkingConfig" in body["generationConfig"]:
+            # This model doesn't support the setting: drop it for this and later calls.
+            self.thinking = "off"
+            body["generationConfig"].pop("thinkingConfig")
+            r = self._post(body)
         if r.status_code == 404:
             # Google retires model names often and says which one to use instead.
             # Follow that hint once, so a renamed model doesn't break the product.
@@ -193,7 +207,8 @@ class ScriptedLLM:
 def make_llm(settings: Settings) -> LLM | None:
     p = settings.resolved_provider()
     if p == "gemini" and settings.gemini_api_key:
-        return GeminiChat(settings.gemini_api_key, settings.gemini_model, timeout=settings.llm_timeout)
+        return GeminiChat(settings.gemini_api_key, settings.gemini_model, timeout=settings.llm_timeout,
+                          thinking=settings.gemini_thinking)
     if p == "openai" and settings.openai_api_key:
         return OpenAIChat(settings.openai_api_key, settings.openai_model, settings.openai_base_url,
                           timeout=settings.llm_timeout)

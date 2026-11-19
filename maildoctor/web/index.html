@@ -120,7 +120,7 @@ const order = {critical:0, warning:1, unknown:2, info:3, ok:4};
 function render(d) {
   const crit = d.findings.filter(f => f.severity==="critical").length, warn = d.findings.filter(f => f.severity==="warning").length;
   const color = d.health_score >= 80 ? "var(--ok)" : d.health_score >= 50 ? "var(--warn)" : "var(--crit)";
-  const headline = crit ? `We found ${crit} problem${crit>1?"s":""} that need fixing` : warn ? "Mostly healthy, a few things to improve" : "Everything we can check looks healthy ✓";
+  const headline = crit ? `We found ${crit} problem${crit>1?"s":""} that need${crit>1?"":"s"} fixing` : warn ? "Mostly healthy, a few things to improve" : "Everything we can check looks healthy ✓";
   let h = `<div class="card"><div class="score" style="color:${color}">${d.health_score}/100</div>
     <h3>${headline}</h3>
     ${d.root_causes?.length && crit ? `<p><b>What's wrong:</b> ${esc(d.root_causes[0])}</p>` : ""}

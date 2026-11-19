@@ -36,6 +36,8 @@ class Settings:
     llm_provider: str = field(default_factory=lambda: _env("MAILDOCTOR_LLM", "auto"))
     gemini_api_key: str = field(default_factory=lambda: _env("GEMINI_API_KEY"))
     gemini_model: str = field(default_factory=lambda: _env("GEMINI_MODEL", "gemini-3.8-flash"))
+    # How much the model "thinks" per step: minimal | low | medium | high | off (don't send the setting)
+    gemini_thinking: str = field(default_factory=lambda: _env("GEMINI_THINKING", "low"))
     openai_api_key: str = field(default_factory=lambda: _env("OPENAI_API_KEY"))
     openai_model: str = field(default_factory=lambda: _env("OPENAI_MODEL", "gpt-4o-mini"))
     openai_base_url: str = field(default_factory=lambda: _env("OPENAI_BASE_URL", "https://api.openai.com/v1"))
@@ -53,7 +55,7 @@ class Settings:
 
     # LLM: seconds to wait for one model reply, and for the whole agent run.
     # If the run budget is used up, MailDoctor finishes with the rule-based playbook.
-    llm_timeout: float = field(default_factory=lambda: float(_env("MAILDOCTOR_LLM_TIMEOUT", "90")))
+    llm_timeout: float = field(default_factory=lambda: float(_env("MAILDOCTOR_LLM_TIMEOUT", "45")))
     agent_budget: float = field(default_factory=lambda: float(_env("MAILDOCTOR_AGENT_BUDGET", "150")))
 
     def resolved_provider(self) -> str:
